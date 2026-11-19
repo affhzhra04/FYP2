@@ -1,0 +1,38 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# Pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Private Innonics telemetry and databases (never commit)
+data/*
+!data/.gitkeep
+*.db
+database/models/
+
+# Virtual environments and editor/tool folders
+venv/
+.venv/
+.antigravity/
+.idea/
+.vscode/
+
+# Generated
+*.log
