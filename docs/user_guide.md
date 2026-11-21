@@ -241,7 +241,7 @@ After new data has been ingested: System & Models > Risk model > train a new ver
 
 ## 8. Data notes
 
-- Source: Innonics GPS and fuel telematics, 9 August to 31 August 2024.
+- Source: Innonics GPS and fuel telematics for three months of 2024 (January, May and August), one JSON file per vehicle per day. Weeks between those months have no data, which is why charts show gaps.
 - 900 files were supplied, 692 contained data. 299,278 readings were read; 3,088 exact duplicate timestamps were removed, leaving 296,190 readings.
 - Fuel data is event-based and noisy; fuel-loss incidents are indicators for review, not proof of theft.
 - Review decisions are stored in `database/reviews.db`. To clear all reviews, close the dashboard and delete that file; it is recreated empty on next start.
