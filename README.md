@@ -35,7 +35,7 @@ The data is private and is not in this repository. Optional alerts: copy `.env.e
 
 ## Tests and validation
 ```
-python -m pytest tests -q                       # 121 automated tests
+python -m pytest tests -q                       # 133 automated tests
 python scripts/validate_fuel_injection.py       # fuel-loss detector recall on injected drops
 streamlit run src/evaluation.py                 # project view: model validation and method (for the panel)
 ```

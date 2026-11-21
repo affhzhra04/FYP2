@@ -21,6 +21,6 @@ Tests are listed in `docs/test_plan_and_results.md`. "Walkthrough" = manual chec
 | NFR-01 | N | Responsiveness | Load: read 0.6 s + detection 1.3 s; live refresh about 30 ms per tick | PERF-01 | Met |
 | NFR-02 | N | Explainability | Per-trip score audit (points per event, formula), per-trip reasons for unusual flags | IT-01, ST-04 | Met |
 | NFR-03 | N | Reliability and error handling | Friendly errors for missing/empty database, bad inputs rejected, dispatch never raises | UT-02, UT-03, IT-06, UT-12, UT-16 | Met |
-| NFR-04 | N | Maintainability | Engine, data layer, ML, review, alerts, performance in separate modules; 121 automated tests | Test run | Met |
+| NFR-04 | N | Maintainability | Engine, data layer, ML, review, alerts, performance in separate modules; 133 automated tests | Test run | Met |
 | NFR-05 | N | Data integrity | Reviews stored in their own database so re-ingestion never deletes them | UT-11 | Met |
 | NFR-06 | N | Usability (stakeholder) | Manager-oriented wording and workflow | UAT-01..UAT-03 | Pending Innonics feedback |

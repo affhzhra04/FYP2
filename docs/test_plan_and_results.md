@@ -1,6 +1,6 @@
 # Test plan and results
 
-Run: `python -m pytest tests -q` from the project root. Last full run (20 Nov 2026): **121 passed, 0 failed**. This includes 33 tests for the current engine, data layer,
+Run: `python -m pytest tests -q` from the project root. Last full run (21 Nov 2026): **133 passed, 0 failed**. This includes 33 tests for the current engine, data layer,
 ML layer, review and alerts (`test_risk_engine.py` 11, `test_dash_core.py` 8, `test_ml_layer.py` 6,
 `test_review_alerts_performance.py` 8) and the earlier tests of the original modules. `tests/conftest.py` blanks the
 Telegram token during tests, so tests never send real messages.
