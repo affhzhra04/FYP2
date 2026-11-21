@@ -61,7 +61,8 @@ def read_pings(db_path) -> pd.DataFrame:
     if df.empty:
         raise DataUnavailable(
             "The telematics_pings table is empty. Run: python -m src.ingest --data-dir <folder>")
-    return df
+    # Re-running ingestion appends rows, so the table can hold the same ping twice. Keep one copy of each.
+    return df.drop_duplicates(subset=["vehicle_id", "timestamp"], keep="first").reset_index(drop=True)
 
 
 @dataclass

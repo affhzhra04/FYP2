@@ -644,7 +644,8 @@ def page_analysis(bundle: C.Bundle, weights) -> None:
         c1, c2, c3 = st.columns([1.3, 1.3, 1.6])
         all_v = sorted(sessions["vehicle_id"].unique().tolist(), key=IA.vehicle_sort_key)
         sel_v = c1.multiselect("Vehicles", all_v, default=all_v, key="ana_v")
-        dmin, dmax = sessions["date"].min(), sessions["date"].max()
+        dmin = min(sessions["date"].min(), ev_all["date"].min())
+        dmax = max(sessions["date"].max(), ev_all["date"].max())      # a trip that starts late can run past midnight
         rng = c2.date_input("Date range", value=(dmin, dmax), min_value=dmin, max_value=dmax, key="ana_d")
         sel_k = c3.multiselect("Incident types", IA.KINDS, default=IA.KINDS, format_func=IA.LABEL.get, key="ana_k")
     lo, hi = (rng[0], rng[-1]) if isinstance(rng, (tuple, list)) and len(rng) else (dmin, dmax)
@@ -717,16 +718,15 @@ def page_analysis(bundle: C.Bundle, weights) -> None:
                    "raises priority and score.")
 
     with t_when:
-        st.subheader("Incidents by hour of day")
+        st.subheader("Incidents by hour of day (00 to 23)")
         h = IA.hour_profile(ev)
         fig = go.Figure()
         for k in IA.KINDS:
             if h[k].sum() > 0:
                 fig.add_trace(go.Bar(x=[f"{i:02d}" for i in h.index], y=h[k], name=IA.LABEL[k],
                                      marker_color=KIND_COLOR[k]))
-        _bar_layout(fig, height=380, barmode="stack", yaxis_title="Incidents",
-                    xaxis=dict(title="Hour of day", type="category"),
-                    legend=dict(orientation="h", y=-0.3, x=0), margin=dict(l=10, r=10, t=10, b=70))
+        _bar_layout(fig, height=360, barmode="stack", yaxis_title="Incidents", xaxis=dict(type="category"),
+                    legend=dict(orientation="h", y=-0.15, x=0), margin=dict(l=10, r=10, t=10, b=70))
         show_fig(fig, key="ana_hour")
         st.subheader("Incident volume by weekday and hour")
         m = IA.weekday_hour(ev)

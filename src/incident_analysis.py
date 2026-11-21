@@ -143,7 +143,7 @@ def trigger_rules(params: Dict[str, float], weights: Optional[Dict[str, float]] 
     w = {**R.DEFAULT_WEIGHTS, **(weights or {})}
     lim = p["speed_limit_kmh"]
     rows = [
-        ("speeding", f"Speed above {lim:.0f} km/h", f"High at {lim + 15:.0f} km/h or more, else Medium"),
+        ("speeding", f"Speed above {lim:.0f} km/h", f"Medium; High from {lim + 15:.0f} km/h"),
         ("harsh_driving", f"Speed changes by {p['harsh_mps2']:.2f} m/s² or more between pings that are at most "
                           f"{p['harsh_max_dt_s']:.0f} s apart", "Medium"),
         ("idling", f"Engine on and not moving for {p['idle_sec'] / 60:.0f} min or more", "Low"),
@@ -151,7 +151,7 @@ def trigger_rules(params: Dict[str, float], weights: Optional[Dict[str, float]] 
                             f"(needs {p['route_min_sessions']:.0f}+ trips of history)", "Medium"),
         ("unauthorized_stop", f"Stopped {p['stop_min_minutes']:.0f} min to {p['stop_max_minutes'] / 60:.0f} h at a "
                               f"place that is not home or a known stop; longer stops count as parking",
-         "High at 2 h or more, else Medium"),
+         "Medium; High from 2 h"),
         ("fuel_theft", f"Fuel drops by {p['fuel_drop_l']:.1f} L or more while parked with the engine off, and "
                        f"stays down", "High"),
         ("fuel_off_route", f"A fuel loss within {p['corr_window_min']:.0f} min of a route deviation or "
