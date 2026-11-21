@@ -67,9 +67,9 @@ Enterprise Fleet app (`app.py`, `views/`) are outside this scope.
 | ST-06 | Incidents & Review: pick incident, set Confirmed with note, Save, reload page | Status and note persist; counters change | Pass (screenshot) |
 | ST-07 | Supervisor alert | Message previewed; logged; sent by Telegram when configured, simulated if not | Pass: LIVE_API, DELIVERED on 20 Nov 2026 04:33 MYT (screenshots of the page and the phone) |
 | ST-08 | Driver Performance | Trend, ranking, behaviour mix, limited-data flags | Pass (screenshot) |
-| ST-09 | Delete the database, start the app | Friendly message, no crash | To confirm |
+| ST-09 | Delete the database, start the app | Friendly message, no crash | Pass (screenshot, 21 Nov 2026: "Database not found ... Run the ingestion step first", no traceback) |
 | ST-10 | System & Models: train new version, switch version | Version table updates; Unusual trips shows the active version | Pass (screenshot: v1, v2, v3) |
-| ST-11 | Incident Analysis: change vehicle, date range and incident-type filters on each tab | KPIs, charts and tables update; empty filter shows a message, no error | To confirm (screenshot) |
+| ST-11 | Incident Analysis: change vehicle, date range and incident-type filters on each tab | KPIs, charts and tables update; empty filter shows a message, no error | Pass (screenshots, 21 Nov 2026: filtered view of 137 incidents; empty selection shows "No incidents match these filters.") |
 
 ## 5. Performance (PERF-01, 692 trips)
 Read database 0.6 s; run all detectors 1.3 s; session scoring 0.02 s; one live refresh about 30 ms (mean of five). First
