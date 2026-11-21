@@ -11,7 +11,8 @@ how much each behaviour counts, review incidents, follow drivers over time, and 
 |---|---|
 | Live Monitor | Multi-vehicle map, live DSS per driver, incident feed (recorded telemetry replayed as a live stream) |
 | Incidents & Review | Priority queue, decision and note per incident, supervisor alerts, unusual trips flagged by the model |
-| Driver Performance | Ranking, weekly trend, what drives each driver's risk, lowest-scoring trips |
+| Incident Analysis | What happens, when, to which vehicles (per 1,000 km), why each type is flagged and how reliable the flags are, from reviewers' decisions |
+| Driver Performance | Ranking, weekly trend, risk contribution by behaviour, lowest-scoring trips |
 | Scoring Policy | Set the weight of each behaviour (speeding, harsh driving, idling, route deviation, unauthorized stop, fuel loss) and preview the effect on the ranking |
 | History & Reports | Trip history with filters, route and telemetry per trip, score audit, CSV / HTML / PDF reports |
 | System & Models | Data coverage and quality, risk-model versions with retraining, alert gateway status |

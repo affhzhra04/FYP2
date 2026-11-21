@@ -5,10 +5,11 @@ Run from the project root:   streamlit run src/dashboard.py
 Pages
   1. Live Monitor       - map, live driver safety scores and incident feed
   2. Incidents & Review - priority queue, review decisions with notes, supervisor alerts, unusual trips
-  3. Driver Performance - ranking, weekly trend and behaviour mix per driver
-  4. Scoring Policy     - decide how much each behaviour counts; preview the effect
-  5. History & Reports  - trip history, filters, unusual-pattern flags, CSV / HTML / PDF reports
-  6. System & Models    - data coverage and quality, risk-model versions with retraining, alert gateway
+  3. Incident Analysis  - what happens, when, to which vehicles, why it is flagged and how reliable the flags are
+  4. Driver Performance - ranking, weekly trend and behaviour mix per driver
+  5. Scoring Policy     - decide how much each behaviour counts; preview the effect
+  6. History & Reports  - trip history, filters, unusual-pattern flags, CSV / HTML / PDF reports
+  7. System & Models    - data coverage and quality, risk-model versions with retraining, alert gateway
 The model-evaluation view for the project panel is a separate app: streamlit run src/evaluation.py
 """
 
@@ -35,6 +36,7 @@ from src import dash_core as C
 from src import risk_engine as R
 from src import ml_layer as ML
 from src import alerts as A
+from src import incident_analysis as IA
 from src import performance as P
 from src import review_store as RS
 
@@ -52,8 +54,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-PAGES = ["Live Monitor", "Incidents & Review", "Driver Performance", "Scoring Policy", "History & Reports",
-         "System & Models"]
+PAGES = ["Live Monitor", "Incidents & Review", "Incident Analysis", "Driver Performance", "Scoring Policy",
+         "History & Reports", "System & Models"]
 SPEEDS = {"1 min / s": 60, "5 min / s": 300, "15 min / s": 900, "1 h / s": 3600}
 TICK_SLEEP_S = 0.5
 VEHICLE_FOCUS_ALL = "All vehicles"
@@ -108,29 +110,28 @@ def _reset_formula() -> None:
 def sidebar():
     with st.sidebar:
         st.markdown("### Driver Risk Monitor")
-        st.caption("Real-time multi-driver safety scoring")
+        st.caption("Real-time multi-driver risk assessment")
         page = st.radio("View", PAGES, label_visibility="collapsed", key="page")
         st.divider()
 
         st.markdown("**Scoring policy**")
-        st.caption("Raise a weight to make that behaviour cost more points.")
+        st.caption("A higher weight assigns more risk points to that behaviour.")
         weights = {}
         for k, default in R.DEFAULT_WEIGHTS.items():
             weights[k] = st.slider(C.KIND_LABEL[k], 0.0, 5.0, float(default), 0.5, key=f"w_{k}")
-        half_life = st.slider("Score memory (hours)", 1, 72, 6, key="half_life",
-                              help="Live Monitor: how long an incident keeps lowering a driver's score. Shorter = scores recover faster.")
-        with st.expander("Strictness"):
-            r0 = st.slider("Score strictness", 3.0, 30.0, 10.0, 1.0, key="r0",
-                           help="Lower = stricter (the same incidents cost more points). Higher = more forgiving.")
-        st.button("Reset formula", on_click=_reset_formula)
+        half_life = st.slider("Score half-life (hours)", 1, 72, 6, key="half_life",
+                              help="Live Monitor: time for an incident's effect on a driver's score to halve. Shorter values let scores recover faster.")
+        with st.expander("Score calibration"):
+            r0 = st.slider("Scoring strictness", 3.0, 30.0, 10.0, 1.0, key="r0",
+                           help="Lower values penalise the same incidents more heavily; higher values are more lenient.")
+        st.button("Reset to defaults", on_click=_reset_formula)
 
         st.divider()
         with st.expander("Detection thresholds"):
             p_speed = st.number_input("Speed limit (km/h)", 40, 140, 90, 5, key="p_speed")
-            p_idle = st.number_input("Idling after (min)", 1, 60, 5, 1, key="p_idle")
-            p_stop = st.number_input("Unauthorized stop after (min)", 5, 240, 30, 5, key="p_stop")
+            p_idle = st.number_input("Idling threshold (min)", 1, 60, 5, 1, key="p_idle")
+            p_stop = st.number_input("Unauthorized stop threshold (min)", 5, 240, 30, 5, key="p_stop")
             p_fuel = st.number_input("Fuel-loss threshold (L)", 0.3, 20.0, 1.0, 0.1, key="p_fuel")
-        st.caption("All times are Malaysia time (MYT).")
 
     params = {"speed_limit_kmh": float(p_speed), "idle_sec": float(p_idle) * 60.0,
               "stop_min_minutes": float(p_stop), "fuel_drop_l": float(p_fuel)}
@@ -216,7 +217,7 @@ def focus_strip(day: C.DayData, vehicle: str, t: pd.Timestamp):
 
 def page_live(bundle: C.Bundle, weights, half_life, r0) -> None:
     st.title("Live Monitor")
-    st.caption("Fleet positions and driver safety scores, updated as incidents occur. Recorded telemetry is replayed as a live feed.")
+    st.caption("Fleet positions, driver safety scores and incidents as they occur. Recorded telemetry is replayed in sequence to simulate a live feed.")
 
     days = C.replay_days(bundle.sessions)
     if days.empty:
@@ -255,25 +256,25 @@ def page_live(bundle: C.Bundle, weights, half_life, r0) -> None:
             st.session_state["play"] = False
         st.session_state["t"] = nxt
 
-    t_sel = st.slider("Simulated time (device clock)", min_value=t0, max_value=t1,
+    t_sel = st.slider("Replay time", min_value=t0, max_value=t1,
                       step=timedelta(minutes=1), format="DD MMM HH:mm", key="t")
     t = pd.Timestamp(t_sel)
     ls = C.live_state(bundle, day, t, weights, half_life, r0)
 
     k = ls.kpis
     m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric("Simulated time", t.strftime("%d %b %H:%M"))
+    m1.metric("Replay time", t.strftime("%d %b %H:%M"))
     m2.metric("Vehicles reporting", f"{k['active']} / {k['vehicles']}")
-    m3.metric("Fleet mean DSS", f"{k['fleet_mean']:.0f}")
+    m3.metric("Fleet average DSS", f"{k['fleet_mean']:.0f}")
     m4.metric("Lowest DSS", f"{k['worst_score']:.0f}", delta=f"vehicle {k['worst_vehicle']}", delta_color="off")
     m5.metric("Incidents (last hour)", k["events_hour"], delta=f"{k['events_total']} today", delta_color="off")
 
     left, right = st.columns([2.1, 1.0], gap="medium")
     with left:
         show_fig(build_live_map(ls, day, focus, f"{sel}-{focus}"), key="live_map")
-        st.caption("Marker colour = current risk tier. Grey line = last 60 min of route. Red dots = recent incidents.")
+        st.caption("Marker colour indicates the current risk tier. The grey line is the last 60 minutes of route; red markers are recent incidents.")
     with right:
-        st.markdown("**Driver safety score (live)**")
+        st.markdown("**Driver Safety Score (DSS)**")
         lb = ls.leaderboard.rename(columns={"vehicle_id": "Vehicle", "score": "DSS", "tier": "Tier",
                                              "status": "Status", "top_factor": "Main factor"})
         show_df(lb[["Vehicle", "DSS", "Tier", "Status", "Main factor"]], height=390,
@@ -300,10 +301,10 @@ def page_live(bundle: C.Bundle, weights, half_life, r0) -> None:
 # ----------------------------------------------------------- page 2: scoring
 def page_lab(bundle: C.Bundle, weights, half_life, r0) -> None:
     st.title("Scoring Policy")
-    st.caption("Decide how much each behaviour counts towards the Driver Safety Score using the sliders on the left. "
-               "The preview below shows how that would change this day's driver ranking.")
+    st.caption("Set the weight of each behaviour in the Driver Safety Score using the sidebar controls. The preview "
+               "compares the resulting scores and ranking with the default policy for the selected day.")
 
-    st.subheader("Preview of your settings")
+    st.subheader("Policy preview")
     days = C.replay_days(bundle.sessions)
     if days.empty:
         st.info("No sessions available.")
@@ -312,23 +313,23 @@ def page_lab(bundle: C.Bundle, weights, half_life, r0) -> None:
     labels = {r.date: f"{pd.Timestamp(r.date):%d %b %Y} - {r.vehicles} vehicles" for r in days.itertuples()}
     if st.session_state.get("lab_date") not in options:
         st.session_state["lab_date"] = C.best_day(days)
-    day = st.selectbox("Compare on day", options, key="lab_date", format_func=lambda d: labels[d])
+    day = st.selectbox("Comparison day", options, key="lab_date", format_func=lambda d: labels[d])
     cmp = C.compare_scores(bundle, day, weights, r0)
     fig = go.Figure()
     fig.add_trace(go.Bar(x=cmp["vehicle_id"], y=cmp["default"], name="Default weights", marker_color="#94a3b8"))
-    fig.add_trace(go.Bar(x=cmp["vehicle_id"], y=cmp["custom"], name="Your weights", marker_color="#2563eb"))
+    fig.add_trace(go.Bar(x=cmp["vehicle_id"], y=cmp["custom"], name="Current weights", marker_color="#2563eb"))
     fig.update_layout(barmode="group", height=320, template="plotly_white", margin=dict(l=10, r=10, t=10, b=10),
                       xaxis_title="Vehicle ID", yaxis_title="Session DSS", yaxis_range=[0, 100],
                       legend=dict(orientation="h", y=1.1))
     show_fig(fig, key="lab_compare")
-    tbl = cmp.rename(columns={"vehicle_id": "Vehicle ID", "default": "DSS (default)", "custom": "DSS (yours)",
+    tbl = cmp.rename(columns={"vehicle_id": "Vehicle ID", "default": "DSS (default)", "custom": "DSS (current)",
                               "delta": "Change", "rank_default": "Risk rank (default)",
-                              "rank_custom": "Risk rank (yours)"})
-    show_df(tbl[["Vehicle ID", "DSS (default)", "DSS (yours)", "Change", "Risk rank (default)",
-                 "Risk rank (yours)"]].round(1))
-    st.caption("Risk rank 1 = highest risk. Vehicles with the same score share a rank.")
+                              "rank_custom": "Risk rank (current)"})
+    show_df(tbl[["Vehicle ID", "DSS (default)", "DSS (current)", "Change", "Risk rank (default)",
+                 "Risk rank (current)"]].round(1))
+    st.caption("Risk rank 1 is the highest risk. Vehicles with the same score share a rank.")
 
-    st.caption("To see how one trip was scored, or to export a report, open History & Reports.")
+    st.caption("Trip-level score breakdowns and reports are available in History & Reports.")
 
 
 def render_audit(bundle, sid, weights, r0, key_prefix: str) -> None:
@@ -351,8 +352,8 @@ def render_audit(bundle, sid, weights, r0, key_prefix: str) -> None:
     items["Time"] = items["Time"].map(fmt_ts)
     show_df(items.round(2), height=min(420, 40 + 35 * len(items)))
     m = a.meta
-    st.info(f"{m['raw_risk']:.1f} risk points over {m['km']:.0f} km = {a.risk:.1f} per 100 km  ->  "
-            f"Driver Safety Score **{a.score:.1f}** ({a.tier})")
+    st.info(f"{m['raw_risk']:.1f} risk points over {m['km']:.0f} km is {a.risk:.1f} per 100 km, "
+            f"giving a Driver Safety Score of **{a.score:.1f}** ({a.tier}).")
 
 
 # ------------------------------------------------------ page 3: sessions
@@ -405,7 +406,7 @@ def timeseries_figure(bundle: C.Bundle, sid: str, speed_limit: float):
 
 def page_sessions(bundle: C.Bundle, weights, half_life, r0) -> None:
     st.title("History & Reports")
-    st.caption("One row per vehicle per day. Filter the history, open a trip to see its route and score, export a report.")
+    st.caption("One row per vehicle-day. Filter the trip history, review a trip's route and score breakdown, and export reports.")
 
     ss = C.session_scores(bundle, weights, r0)
     with st.container(border=True):
@@ -416,7 +417,7 @@ def page_sessions(bundle: C.Bundle, weights, half_life, r0) -> None:
         rng = c2.date_input("Date range", value=(dmin, dmax), min_value=dmin, max_value=dmax, key="f_dates")
         tiers = ["Critical", "High Risk", "Moderate Risk", "Low Risk", "Excellent"]
         sel_t = c3.multiselect("Risk tier", tiers, default=tiers, key="f_tiers")
-        hide_small = st.checkbox(f"Hide very short sessions (< {C.MIN_PINGS_REPLAY} pings)", value=True, key="f_small")
+        hide_small = st.checkbox(f"Exclude short sessions (fewer than {C.MIN_PINGS_REPLAY} pings)", value=True, key="f_small")
 
     lo, hi = (rng[0], rng[-1]) if isinstance(rng, (tuple, list)) and len(rng) else (dmin, dmax)
     f = ss[ss["vehicle_id"].isin(sel_v) & ss["tier"].isin(sel_t) & (ss["date"] >= lo) & (ss["date"] <= hi)]
@@ -480,7 +481,7 @@ def page_sessions(bundle: C.Bundle, weights, half_life, r0) -> None:
             r2.download_button("Download report (PDF)", pdf, file_name=f"report_{sid}.pdf",
                                mime="application/pdf", key="dl_pdf")
         else:
-            r2.caption("Install reportlab (pip install reportlab) to enable PDF export.")
+            r2.caption("PDF export is unavailable because the reportlab package is not installed (pip install reportlab).")
 
 
 # --------------------------------------------------------- incidents & review
@@ -490,7 +491,7 @@ def _review_form(item_id: str, item_type: str, current: dict, key: str) -> None:
                               index=RS.STATUSES.index(current["status"]) if current.get("status") in RS.STATUSES else 0)
         reviewer = st.text_input("Reviewed by", value=st.session_state.get("reviewer", current.get("reviewer", "")),
                                  key=f"rv_{key}")
-        note = st.text_area("Note (what did you find?)", value=current.get("note", ""), key=f"nt_{key}", height=90)
+        note = st.text_area("Review notes (findings)", value=current.get("note", ""), key=f"nt_{key}", height=90)
         if st.form_submit_button("Save review"):
             RS.save_review(item_id, item_type, status, note, reviewer)
             st.session_state["reviewer"] = reviewer
@@ -512,7 +513,7 @@ def _incident_frame(bundle: C.Bundle) -> pd.DataFrame:
 
 def page_incidents(bundle: C.Bundle, weights, r0) -> None:
     st.title("Incidents & Review")
-    st.caption("Incidents that need a decision. Open one, record what you found, and alert the supervisor if needed.")
+    st.caption("Review queue for detected incidents. Select an incident, record the decision and findings, and notify the supervisor where required.")
     t_queue, t_trips = st.tabs(["Incident queue", "Unusual trips"])
 
     with t_queue:
@@ -549,7 +550,7 @@ def page_incidents(bundle: C.Bundle, weights, r0) -> None:
             st.download_button("Download queue (CSV)", tbl.to_csv(index=False).encode("utf-8"),
                                file_name="incident_queue.csv", mime="text/csv", key="dl_queue")
 
-            st.subheader("Review an incident")
+            st.subheader("Incident review")
             pick = f.head(300)
             labels = {r.item_id: f"{r.priority} | {fmt_ts(r.start)} | vehicle {r.vehicle_id} | {r.event} - {r.detail}"
                       for r in pick.itertuples()}
@@ -566,7 +567,7 @@ def page_incidents(bundle: C.Bundle, weights, r0) -> None:
                 _review_form(iid, "incident", dict(status=row["status"] if row["status"] != "Open" else "",
                                                    note=row["note"], reviewer=row["reviewer"]), key="inc")
                 msg = A.alert_text(row["vehicle_id"], row["event"], row["detail"], fmt_ts(row["start"]), row["priority"])
-                with st.expander("Alert the supervisor"):
+                with st.expander("Supervisor alert"):
                     st.code(msg, language=None)
                     if st.button("Send alert (Telegram)", key="send_alert"):
                         mode, status, note = A.dispatch(msg)
@@ -574,20 +575,20 @@ def page_incidents(bundle: C.Bundle, weights, r0) -> None:
                         if mode == "LIVE_API" and status == "DELIVERED":
                             st.success("Alert delivered to the Telegram group.")
                         else:
-                            st.warning(f"Alert logged but not delivered live ({mode}, {status}). {note}")
+                            st.warning(f"Alert recorded but not delivered live ({mode}, {status}). {note}")
 
         with st.expander("Alert history"):
             log = RS.load_alert_log()
             if log.empty:
                 st.caption("No alerts sent yet.")
             else:
-                show_df(log.drop(columns=["message"]).rename(columns={"sent_at": "Sent (MYT)", "item_id": "Item",
+                show_df(log.drop(columns=["message"]).rename(columns={"sent_at": "Sent", "item_id": "Item",
                                                                        "channel": "Channel", "mode": "Mode",
                                                                        "status": "Status"}), height=220)
 
     with t_trips:
-        st.caption("Trips whose overall driving pattern differs from most others (found by a machine-learning model, "
-                   "not by the rules). Useful for catching things the rules do not describe.")
+        st.caption("Trips whose overall driving pattern differs from the rest of the fleet, identified by the "
+                   "machine-learning model rather than the detection rules. These can surface behaviour the rules do not cover.")
         try:
             ml = get_ml(bundle, tuple(sorted(bundle.params.items())))
         except Exception as exc:                                   # scikit-learn missing
@@ -605,7 +606,7 @@ def page_incidents(bundle: C.Bundle, weights, r0) -> None:
         flagged["note"] = [rv.get(RS.trip_key(i), {}).get("note", "") for i in flagged["session_id"]]
         flagged = flagged.sort_values("anomaly", ascending=False)
         tt = flagged[["session_id", "vehicle_id", "km", "reason", "score", "tier", "status", "reviewer", "note"]].rename(
-            columns={"session_id": "Trip", "vehicle_id": "Vehicle ID", "reason": "What is unusual", "score": "DSS",
+            columns={"session_id": "Trip", "vehicle_id": "Vehicle ID", "reason": "Reason flagged", "score": "DSS",
                      "tier": "Tier", "status": "Status", "reviewer": "Reviewed by", "note": "Note"}).round(1)
         show_df(tt, height=280)
         sid = st.selectbox("Trip", flagged["session_id"].tolist(), key="trip_pick",
@@ -616,16 +617,193 @@ def page_incidents(bundle: C.Bundle, weights, r0) -> None:
         with l2:
             show_fig(route_figure(bundle, sid), key="trip_route")
         with r2:
-            st.markdown(f"**What is unusual:** {r['reason']}")
+            st.markdown(f"**Reason flagged:** {r['reason']}")
             st.caption(f"Rule-based score {r['score']:.0f} ({r['tier']}). Status: {r['status']}.")
             _review_form(RS.trip_key(sid), "trip", dict(status=r["status"] if r["status"] != "Open" else "",
                                                           note=r["note"], reviewer=r["reviewer"]), key="trip")
 
 
+# ------------------------------------------------------------ incident analysis
+def _bar_layout(fig, height=340, **kw) -> None:
+    layout = dict(height=height, margin=dict(l=10, r=10, t=10, b=10), template="plotly_white")
+    layout.update(kw)                      # a caller may override margin, legend, axes ...
+    fig.update_layout(**layout)
+
+
+def page_analysis(bundle: C.Bundle, weights) -> None:
+    st.title("Incident Analysis")
+    st.caption("Fleet incident patterns by type, time and vehicle, with the rules behind each detection and the "
+               "review outcomes recorded so far.")
+    ev_all = _incident_frame(bundle)
+    if ev_all.empty:
+        st.info("No incidents were detected in the loaded telemetry.")
+        return
+
+    sessions = bundle.sessions
+    with st.container(border=True):
+        c1, c2, c3 = st.columns([1.3, 1.3, 1.6])
+        all_v = sorted(sessions["vehicle_id"].unique().tolist(), key=IA.vehicle_sort_key)
+        sel_v = c1.multiselect("Vehicles", all_v, default=all_v, key="ana_v")
+        dmin, dmax = sessions["date"].min(), sessions["date"].max()
+        rng = c2.date_input("Date range", value=(dmin, dmax), min_value=dmin, max_value=dmax, key="ana_d")
+        sel_k = c3.multiselect("Incident types", IA.KINDS, default=IA.KINDS, format_func=IA.LABEL.get, key="ana_k")
+    lo, hi = (rng[0], rng[-1]) if isinstance(rng, (tuple, list)) and len(rng) else (dmin, dmax)
+    sess = sessions[sessions["vehicle_id"].isin(sel_v) & (sessions["date"] >= lo) & (sessions["date"] <= hi)]
+    ev = ev_all[ev_all["vehicle_id"].isin(sel_v) & (ev_all["date"] >= lo) & (ev_all["date"] <= hi)
+                & ev_all["kind"].isin(sel_k)]
+    ev = IA.add_points(ev, weights, bundle.params["speed_limit_kmh"])
+    if ev.empty:
+        st.info("No incidents match these filters.")
+        return
+
+    km = float(sess["km"].sum())
+    ro = IA.review_outcomes(ev)
+    conf, fals = int(ro["confirmed"].sum()), int(ro["false_alarm"].sum())
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("Incidents", f"{len(ev):,}")
+    k2.metric("Per 1,000 km", f"{len(ev) / km * 1000:.1f}" if km > 0 else "-",
+              help=f"{km:,.0f} km driven by the selected vehicles in this period.")
+    k3.metric("High priority", int((ev["priority"] == "High").sum()))
+    k4.metric("Reviewed", f"{(ev['status'] != 'Open').mean():.0%}",
+              help="Share of incidents with a decision (Confirmed, False alarm or Follow-up needed).")
+    k5.metric("False-alarm rate", f"{fals / (conf + fals):.0%}" if conf + fals else "-",
+              help="False alarms among incidents that have a final decision (Confirmed or False alarm).")
+
+    findings = IA.insights(ev, sess)
+    with st.container(border=True):
+        st.markdown("**Summary**")
+        for line in findings:
+            st.markdown(f"- {line}")
+
+    t_over, t_when, t_veh, t_why = st.tabs(["Overview", "Time patterns", "Vehicles", "Detection and review"])
+
+    with t_over:
+        t = IA.by_type(ev)
+        left, right = st.columns(2)
+        with left:
+            st.subheader("Incidents by type")
+            d = t[t["incidents"] > 0].sort_values("incidents")
+            fig = go.Figure(go.Bar(y=d["label"], x=d["incidents"], orientation="h", text=d["incidents"],
+                                   textposition="outside", cliponaxis=False,
+                                   marker_color=[KIND_COLOR[k] for k in d["kind"]],
+                                   hovertemplate="%{y}: %{x:,}<extra></extra>"))
+            _bar_layout(fig, xaxis=dict(title="Incidents", range=[0, float(d["incidents"].max()) * 1.15]),
+                        margin=dict(l=10, r=40, t=10, b=10))
+            show_fig(fig, key="ana_type")
+        with right:
+            st.subheader("Incident share vs. risk-point share")
+            st.caption("Where the risk-point share exceeds the incident share, the type weighs more on driver "
+                       "scores than its frequency suggests.")
+            d = t[t["incidents"] > 0].sort_values("share_points")
+            fig = go.Figure()
+            fig.add_trace(go.Bar(y=d["label"], x=d["share_incidents"], orientation="h", name="Share of incidents",
+                                 marker_color="#94a3b8", hovertemplate="%{y}: %{x:.0%} of incidents<extra></extra>"))
+            fig.add_trace(go.Bar(y=d["label"], x=d["share_points"], orientation="h", name="Share of risk points",
+                                 marker_color="#14213d", hovertemplate="%{y}: %{x:.0%} of risk points<extra></extra>"))
+            _bar_layout(fig, barmode="group", xaxis=dict(tickformat=".0%"),
+                        legend=dict(orientation="h", y=1.12, x=0))
+            show_fig(fig, key="ana_cost")
+        st.subheader("Incidents per week")
+        w = IA.weekly_trend(ev)
+        fig = go.Figure()
+        for k in IA.KINDS:
+            if k in w and w[k].sum() > 0:
+                fig.add_trace(go.Bar(x=w.index, y=w[k], name=IA.LABEL[k], marker_color=KIND_COLOR[k]))
+        _bar_layout(fig, height=320, barmode="stack", yaxis_title="Incidents",
+                    legend=dict(orientation="h", y=-0.2, x=0))
+        show_fig(fig, key="ana_week")
+        st.caption("Weeks without bars have no telemetry in the dataset; they do not indicate zero incidents. "
+                   "Fuel loss + off-route events are also counted under Fuel loss (stationary); the combined flag "
+                   "raises priority and score.")
+
+    with t_when:
+        st.subheader("Incidents by hour of day")
+        h = IA.hour_profile(ev)
+        fig = go.Figure()
+        for k in IA.KINDS:
+            if h[k].sum() > 0:
+                fig.add_trace(go.Bar(x=[f"{i:02d}" for i in h.index], y=h[k], name=IA.LABEL[k],
+                                     marker_color=KIND_COLOR[k]))
+        _bar_layout(fig, height=380, barmode="stack", yaxis_title="Incidents",
+                    xaxis=dict(title="Hour of day", type="category"),
+                    legend=dict(orientation="h", y=-0.3, x=0), margin=dict(l=10, r=10, t=10, b=70))
+        show_fig(fig, key="ana_hour")
+        st.subheader("Incident volume by weekday and hour")
+        m = IA.weekday_hour(ev)
+        fig = go.Figure(go.Heatmap(z=m.values, x=[f"{i:02d}" for i in m.columns], y=list(m.index),
+                                   colorscale="YlOrRd", colorbar=dict(title="Incidents"),
+                                   hovertemplate="%{y} %{x}:00 - %{z} incidents<extra></extra>"))
+        _bar_layout(fig, height=280, xaxis_title="Hour of day", yaxis=dict(autorange="reversed"))
+        show_fig(fig, key="ana_heat")
+
+    with t_veh:
+        vp = IA.vehicle_profile(ev, sess)
+        left, right = st.columns(2)
+        with left:
+            st.subheader("Incidents per vehicle")
+            fig = go.Figure()
+            for k in IA.KINDS:
+                if vp[k].sum() > 0:
+                    fig.add_trace(go.Bar(x=vp["vehicle_id"].astype(str), y=vp[k], name=IA.LABEL[k],
+                                         marker_color=KIND_COLOR[k]))
+            _bar_layout(fig, barmode="stack", yaxis_title="Incidents", xaxis=dict(type="category", title="Vehicle ID"),
+                        legend=dict(orientation="h", y=-0.3, x=0))
+            show_fig(fig, key="ana_veh")
+        with right:
+            basis = st.radio("Compare vehicles by", ["Incidents per 1,000 km", "Risk points per 1,000 km"],
+                             horizontal=True, key="ana_basis")
+            col = "per_1000km" if basis.startswith("Incidents") else "points_per_1000km"
+            st.caption("Normalised by distance driven so that vehicles can be compared fairly. Risk points weight "
+                       "each incident by its severity, so frequent low-severity events such as idling count for less.")
+            d = vp[vp[col].notna()].sort_values(col, ascending=False)
+            fig = go.Figure(go.Bar(x=d["vehicle_id"].astype(str), y=d[col], marker_color="#14213d",
+                                   hovertemplate="Vehicle %{x}: %{y:.1f}<extra></extra>"))
+            _bar_layout(fig, yaxis_title=basis, xaxis=dict(type="category", title="Vehicle ID"))
+            show_fig(fig, key="ana_rate")
+        tbl = vp[["vehicle_id", "km", "incidents", "per_1000km", "points_per_1000km"] + IA.KINDS].rename(
+            columns={"vehicle_id": "Vehicle ID", "km": "Distance (km)", "incidents": "Incidents",
+                     "per_1000km": "Incidents per 1,000 km", "points_per_1000km": "Risk points per 1,000 km",
+                     **IA.LABEL}).round(1)
+        show_df(tbl, height=min(420, 60 + 36 * len(tbl)))
+        if (vp["km"] < 100).any():
+            st.caption("Vehicles with under 100 km in this period have unstable rates and should be read with caution.")
+
+    with t_why:
+        st.subheader("Detection rules")
+        st.caption("The condition that raises each incident type, using the detection thresholds and scoring weights "
+                   "currently applied. The reading that triggered an individual incident (for example peak speed or "
+                   "minutes stopped) is shown in Incidents & Review.")
+        rules = IA.trigger_rules(bundle.params, weights).drop(columns=["kind"])
+        show_df(rules, height=60 + 36 * len(rules))
+
+        st.subheader("Review outcomes by incident type")
+        st.caption("Decisions recorded in Incidents & Review. A low confirmation rate indicates a detector that "
+                   "raises many false alarms and may need its threshold adjusted.")
+        r = ro.copy()
+        r["confirm_rate"] = r["confirm_rate"].map(lambda x: "-" if pd.isna(x) else f"{x:.0%}")
+        r = r[["label", "incidents", "open", "confirmed", "false_alarm", "follow_up", "confirm_rate"]].rename(
+            columns={"label": "Incident", "incidents": "Incidents", "open": "Open", "confirmed": "Confirmed",
+                     "false_alarm": "False alarm", "follow_up": "Follow-up needed",
+                     "confirm_rate": "Confirmation rate"})
+        show_df(r[r["Incidents"] > 0], height=60 + 36 * int((r["Incidents"] > 0).sum()))
+
+        st.subheader("Highest-impact incidents")
+        top = ev.sort_values("points", ascending=False).head(10)
+        tt = top[["start", "vehicle_id", "event", "detail", "priority", "status", "points"]].copy()
+        tt["start"] = tt["start"].map(fmt_ts)
+        tt = tt.rename(columns={"start": "Time", "vehicle_id": "Vehicle ID", "event": "Event", "detail": "Detail",
+                                "priority": "Priority", "status": "Status", "points": "Risk points"}).round(2)
+        show_df(tt, height=60 + 36 * len(tt))
+        out = ev[["start", "vehicle_id", "session_id", "event", "detail", "priority", "status", "points"]].copy()
+        out["start"] = out["start"].map(fmt_ts)
+        st.download_button("Download analysed incidents (CSV)", out.to_csv(index=False).encode("utf-8"),
+                           file_name="incident_analysis.csv", mime="text/csv", key="dl_analysis")
+
+
 # ------------------------------------------------------------ driver performance
 def page_performance(bundle: C.Bundle, weights, r0) -> None:
     st.title("Driver Performance")
-    st.caption("How each driver is doing over time. Only days when the vehicle drove 50 km or more are counted.")
+    st.caption("Driver score trends and ranking over time. Only days with at least 50 km driven are included.")
     scored = C.session_scores(bundle, weights, r0)
     allsess = P.driving(scored)
     if allsess.empty:
@@ -659,7 +837,7 @@ def page_performance(bundle: C.Bundle, weights, r0) -> None:
     fleet = P.fleet_weekly(trend, d_in)
     enough = tbl[tbl["Data"] == ""]
     default_lines = (enough if len(enough) >= 3 else tbl).head(3)["vehicle_id"].tolist()
-    lines = st.multiselect("Show these drivers on the chart", tbl["vehicle_id"].tolist(), default=default_lines, key="perf_lines")
+    lines = st.multiselect("Drivers shown on chart", tbl["vehicle_id"].tolist(), default=default_lines, key="perf_lines")
     fig = go.Figure()
     for v in lines:
         g = trend[trend["vehicle_id"] == v]
@@ -676,13 +854,13 @@ def page_performance(bundle: C.Bundle, weights, r0) -> None:
     show["Trend (pts)"] = show["Trend (pts)"].round(1)
     show_df(show.round(1), height=min(420, 60 + 36 * len(show)), column_config={
         "Mean DSS": st.column_config.ProgressColumn("Mean DSS", min_value=0, max_value=100, format="%.0f")})
-    st.caption("Trend = change in mean score between the driver's latest month and the month before it that has "
-               "data (at least 2 driving days each). Drivers with fewer than 5 driving days are marked Limited "
-               "data and should not be ranked firmly.")
+    st.caption("Trend is the change in mean score between the driver's latest month and the most recent earlier "
+               "month with data (at least 2 driving days each). Drivers with fewer than 5 driving days are marked "
+               "Limited data; their ranking is indicative only.")
     st.download_button("Download driver report (CSV)", show.to_csv(index=False).encode("utf-8"),
                        file_name="driver_performance.csv", mime="text/csv", key="dl_perf")
 
-    st.subheader("What drives each driver's risk")
+    st.subheader("Risk contribution by behaviour")
     mix = P.behaviour_mix(scored, bundle.events, weights, r0, lo, hi, lim)
     mix = mix[mix["vehicle_id"].isin(sel_v)]
     mix = mix.set_index("vehicle_id").loc[[v for v in tbl["vehicle_id"] if v in set(mix["vehicle_id"])]].reset_index() \
@@ -697,7 +875,7 @@ def page_performance(bundle: C.Bundle, weights, r0) -> None:
                        legend=dict(orientation="h", y=1.12), yaxis=dict(autorange="reversed"))
     show_fig(fig2, key="perf_mix")
 
-    st.subheader("Driver focus")
+    st.subheader("Driver detail")
     v = st.selectbox("Driver (vehicle)", tbl["vehicle_id"].tolist(), key="perf_focus",
                      format_func=lambda x: f"Vehicle {x}")
     worst = d_in[d_in["vehicle_id"] == v].sort_values("score").head(8)
@@ -705,7 +883,7 @@ def page_performance(bundle: C.Bundle, weights, r0) -> None:
     wt["start"] = wt["start"].map(fmt_ts)
     wt = wt.rename(columns={"session_id": "Trip", "start": "Start", "km": "km", "events": "Incidents",
                             "score": "DSS", "tier": "Tier"}).round(1)
-    st.markdown("**Lowest-scoring trips** (open them in History & Reports for the route and score breakdown)")
+    st.markdown("**Lowest-scoring trips** - open in History & Reports for the route and score breakdown.")
     show_df(wt, height=min(330, 60 + 36 * len(wt)))
 
 
@@ -736,7 +914,7 @@ def get_ml(bundle: C.Bundle, cache_key: tuple):
 # --------------------------------------------------------------- system & models
 def page_system(bundle: C.Bundle) -> None:
     st.title("System & Models")
-    st.caption("Data coverage, the risk model that flags unusual trips, and the alert gateway.")
+    st.caption("Data coverage and quality, the trip risk model, and the alert gateway.")
     df, sess = bundle.df, bundle.sessions
     real = sess[sess["pings"] >= C.MIN_PINGS_REPLAY]
 
@@ -765,8 +943,8 @@ def page_system(bundle: C.Bundle) -> None:
     show_df(cov.sort_values("Vehicle ID", key=lambda x: x.astype(int)).round(0), height=min(400, 60 + 36 * len(cov)))
 
     st.subheader("Risk model")
-    st.caption("Learns normal driving patterns from the telemetry and flags unusual trips for review. "
-               "Trained on the rule-based scores, because no crash or claims history is available.")
+    st.caption("Learns typical driving patterns from the telemetry to flag unusual trips for review. It is trained "
+               "on the rule-based scores because no crash or claims history is available.")
     versions = ML.list_versions()
     act = ML.active_version()
     if act is None:
@@ -775,12 +953,12 @@ def page_system(bundle: C.Bundle) -> None:
     else:
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Active version", f"v{act['version']}")
-        m2.metric("Trained", str(act["trained_at"])[:16].replace("T", " "), help="Malaysia time")
+        m2.metric("Trained", str(act["trained_at"])[:16].replace("T", " "))
         m3.metric("Learned from", f"{act['n_driving']} driving trips", f"{act['n_trips']} trips in total", delta_color="off")
         m4.metric("Vehicles", act["n_vehicles"])
-        st.success(f"Model health: on vehicles it had never seen, it placed a trip within one risk tier of the "
-                   f"rule-based result {act['rf_within1']:.0%} of the time (a model that always guesses the typical "
-                   f"trip manages {act['base_within1']:.0%}). Trips it ranks as most unusual are shown in Incidents & Review.")
+        st.success(f"Validation: on vehicles not seen during training, the model placed a trip within one risk tier "
+                   f"of the rule-based result {act['rf_within1']:.0%} of the time (baseline of always predicting the "
+                   f"typical trip: {act['base_within1']:.0%}). The trips it ranks as most unusual appear in Incidents & Review.")
     c1, c2 = st.columns([1, 3])
     if c1.button("Train new version" if act else "Train model", key="train_btn"):
         with st.spinner("Training and validating (about 30 seconds)..."):
@@ -795,9 +973,9 @@ def page_system(bundle: C.Bundle) -> None:
     if versions:
         vt = pd.DataFrame([{
             "Version": f"v{m['version']}" + (" (active)" if act and m["version"] == act["version"] else ""),
-            "Trained (MYT)": str(m["trained_at"])[:16].replace("T", " "), "Data period": m.get("date_range", ""),
+            "Trained": str(m["trained_at"])[:16].replace("T", " "), "Data period": m.get("date_range", ""),
             "Driving trips": m["n_driving"], "Within one tier": f"{m['rf_within1']:.0%}",
-            "Rank agreement": round(m["rf_spearman"], 2), "Avg score error": round(m["rf_mae"], 1)} for m in versions])
+            "Rank agreement (Spearman)": round(m["rf_spearman"], 2), "Mean score error (points)": round(m["rf_mae"], 1)} for m in versions])
         show_df(vt, height=min(300, 60 + 36 * len(vt)))
         if len(versions) > 1:
             pick = st.selectbox("Switch active version", [m["version"] for m in versions],
@@ -814,14 +992,14 @@ def page_system(bundle: C.Bundle) -> None:
         live = svc.is_configured
     except Exception:
         live = False
-    st.write("Telegram: " + ("connected" if live else "not configured - alerts are logged in simulation mode. "
-                             "Add TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to .env to send them live."))
+    st.write("Telegram: " + ("connected." if live else "not configured. Alerts are recorded in simulation mode. "
+                             "Add TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to the .env file to send them live."))
     if st.button("Send test message", key="test_alert"):
         mode, status, note = A.dispatch("Driver Risk Monitor: test message from System & Models.")
         (st.success if mode == "LIVE_API" and status == "DELIVERED" else st.warning)(
             f"Test result: {mode}, {status}. {note}")
 
-    with st.expander("Detection settings in force"):
+    with st.expander("Active detection settings"):
         show_df(pd.DataFrame({"Setting": list(bundle.params), "Value": list(bundle.params.values())}))
 
 
@@ -849,6 +1027,8 @@ def main() -> None:
             page_live(bundle, weights, half_life, r0)
         elif page == "Incidents & Review":
             page_incidents(bundle, weights, r0)
+        elif page == "Incident Analysis":
+            page_analysis(bundle, weights)
         elif page == "Driver Performance":
             page_performance(bundle, weights, r0)
         elif page == "System & Models":
