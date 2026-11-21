@@ -1,6 +1,6 @@
 # Driver Risk Monitor
 
-Real-time multi-driver risk assessment from vehicle telemetry, built for fleet managers at Innonics Sdn. Bhd.
+Real-time multi-driver risk assessment from vehicle telemetry, built for fleet managers.
 Final-year project WIA3003 (Universiti Malaya), Afifah Zahra binti Zulkifli (22003045), supervisor Dr. Liew Wei Shiung.
 
 Every driver gets one **Driver Safety Score (DSS)** from 0 to 100 that updates as incidents happen. Managers can change
