@@ -128,7 +128,6 @@ class TelegramNotificationService:
         payload = {
             "chat_id": target_chat,
             "text": text_message,
-            "parse_mode": "Markdown",
             "disable_web_page_preview": True,
         }
 

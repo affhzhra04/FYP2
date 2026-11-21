@@ -80,3 +80,32 @@ def test_dss_bounds_monotonic_and_recovery():
 def test_clean_vehicle_scores_100():
     s = R.dss(pd.DataFrame(columns=R.EVENT_COLUMNS), universe=["1"])
     assert s.score.iloc[0] == 100.0
+
+
+def test_parking_is_not_an_unauthorized_stop():
+    """Stops of 6 h or more, and vehicle-days with no movement, are parking, not unplanned stops."""
+    import numpy as np
+    import pandas as pd
+    from src import risk_engine as R
+
+    def day(sid, minutes_stop, drive_first=True):
+        t0 = pd.Timestamp("2024-03-01 09:00:00")
+        rows = []
+        n_drive = 60 if drive_first else 0
+        for i in range(n_drive):                       # about 20 km of driving
+            rows.append((t0 + pd.Timedelta(seconds=30 * i), 3.10 + 0.002 * i, 101.60, 40.0, 1, 100.0))
+        t1 = t0 + pd.Timedelta(seconds=30 * n_drive)
+        for m in range(0, minutes_stop + 1, 5):       # then stationary at a place no other session uses
+            rows.append((t1 + pd.Timedelta(minutes=m), 3.30, 101.75, 0.0, 0, 100.0))
+        d = pd.DataFrame(rows, columns=["timestamp", "latitude", "longitude", "speed", "ignition", "fuel_level"])
+        d["vehicle_id"] = 1
+        d["session_id"] = sid
+        return d
+
+    p = R.DEFAULT_PARAMS
+    for minutes, drive, expect in [(120, True, 1), (480, True, 0), (120, False, 0)]:
+        pings = day("s", minutes, drive)
+        prep = R.prepare(pings)
+        got = R.detect_unauthorized_stops(prep, p, homes=pd.DataFrame(
+            {"vehicle_id": ["1"], "home_lat": [0.0], "home_lon": [0.0]}))
+        assert len(got) == expect, (minutes, drive, len(got))

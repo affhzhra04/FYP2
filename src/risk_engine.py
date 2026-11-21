@@ -29,6 +29,8 @@ DEFAULT_PARAMS: Dict[str, float] = {
     "harsh_max_dt_s": 15.0,      # acceleration is only meaningful on dense pings
     "idle_sec": 300.0,
     "stop_min_minutes": 30.0,
+    "stop_max_minutes": 360.0,   # a stop this long is parking (off duty), not an unplanned stop
+    "stop_min_session_km": 1.0,  # a vehicle that did not move that day has nothing to deviate from
     "stop_cell_deg": 0.005,      # ~550 m grid for "known places"
     "stop_known_sessions": 5,    # a place visited by >=5 sessions is a known stop
     "stop_home_km": 1.5,
@@ -195,7 +197,12 @@ def detect_unauthorized_stops(df, p, homes=None):
     d_home = haversine_km(stops["lat"], stops["lon"], stops["home_lat"], stops["home_lon"])
     # support includes the stop's own session -> require >= N distinct sessions
     unknown = (stops["support"] < p["stop_known_sessions"]) & (d_home > p["stop_home_km"])
-    out = stops[unknown].copy()
+    # Parking is not an unplanned stop: skip stops of 6 h or more (overnight/off duty) and vehicle-days
+    # in which the vehicle did not really move (it was simply parked all day).
+    km = df.groupby("session_id")["step_km"].sum()
+    moved = stops["session_id"].map(km).fillna(0.0) >= p["stop_min_session_km"]
+    not_parking = stops["duration_s"] < p["stop_max_minutes"] * 60.0
+    out = stops[unknown & moved & not_parking].copy()
     out["kind"] = "unauthorized_stop"
     out["magnitude"] = out["duration_s"] / 60.0     # minutes
     return out[EVENT_COLUMNS].reset_index(drop=True)
